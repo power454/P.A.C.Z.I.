@@ -265,8 +265,10 @@ BEGIN
         (v_zamowienia,
         TO_DATE(sysdate,'DD-MM-YYYY'),
         CASE
-            WHEN p_forma_platnosci = 'przelew' THEN sysdate
-            ELSE NULL
+            WHEN 
+                p_forma_platnosci = 'przelew' THEN sysdate
+            ELSE 
+                NULL
         END,
         p_forma_platnosci,
         v_suma_zamowienia-ROUND(v_suma_zamowienia*0.23,2),
@@ -288,7 +290,7 @@ BEGIN
 
 
     UPDATE FAKTURA_SPECYFIKACJA SET ID_FAKTURY = v_faktura WHERE ID_FAKTURY IS NULL;
-
+    COMMIT;
 END ZAPIS_ZAMOWIENIA;
 
 -- Z1
