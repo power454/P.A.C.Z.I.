@@ -3,11 +3,13 @@ Czas operacyjny: do 29.01.2022 EOD (23:59)
 Skrypt na mail: l.kosiciarz@wit.edu.pl
 Zoptymalizować struktury uwzględaniając poniższe wymagania:
 
-* Klucze (PK, FK)
-* Constrainty pomocnicze tj. np. Check
-* Indeksy
-* Kolumny: not null
+* Klucze (PK, FK) - zrobione
+* Constrainty pomocnicze tj. np. Check - zrobione
+* Indeksy - zrobione
+* Kolumny: not null - zrobione
 * Procedura do zapisu zamówienia (zakladamy, że detale bez ID_ZAMOWIENIA są w tabeli jako koszyk)
+Zawsze obliczac z brutto wartosc podatku, a potem wyliczyc netto!!!!!!!!!!!!!!!!!!
+* procedura do zapisu faktury -
 * Zebrane statystyki
 * 2 przykładowe zapytania z naszej bazy danych - skomplikowane i optymalnie napisane
 
@@ -202,7 +204,8 @@ SELECT * FROM ZAMOWIENIE_DETALE;
 SELECT * FROM ZAMOWIENIE;
 SELECT * FROM FAKTURA;
 SELECT * FROM FAKTURA_SPECYFIKACJA;
-SELECT SUM(KWOTA_NETTO), SUM(KWOTA_VAT), SUM(KWOTA_BRUTTO) FROM FAKTURA_SPECYFIKACJA WHERE ID_FAKTURY = 6;
+SELECT SUM(cena_jednostkowa*ilosc) FROM zamowienie_detale WHERE ID_ZAMOWIENIA = 1;
+SELECT SUM(KWOTA_NETTO), SUM(KWOTA_VAT), SUM(KWOTA_BRUTTO) FROM FAKTURA_SPECYFIKACJA WHERE ID_FAKTURY = 1;
 SELECT * FROM ZAMOWIENIE;
 
 SELECT SUM(cena_jednostkowa*ilosc) FROM zamowienie_detale WHERE ID_ZAMOWIENIA IS NULL;
@@ -223,11 +226,9 @@ CREATE OR REPLACE PROCEDURE ZAPIS_ZAMOWIENIA
 IS
     v_zamowienia ZAMOWIENIE.ID%type;
     v_czy_oplacone ZAMOWIENIE.CZY_OPLACONE%type;
-    -- do wybory przelew lub gotowka
     v_suma_zamowienia ZAMOWIENIE.SUMA_ZAMOWIENIA%type;
     v_data_platnosci ZAMOWIENIE.DATA_ZAMOWIENIA%type;
     v_faktura FAKTURA.ID%type;
-    v_suma_netto ZAMOWIENIE.SUMA_ZAMOWIENIA%type;
 BEGIN
 
     INSERT INTO zamowienie
@@ -255,33 +256,83 @@ BEGIN
         RETURNING ID,czy_oplacone,suma_zamowienia INTO v_zamowienia,v_czy_oplacone,v_suma_zamowienia;
 
     UPDATE ZAMOWIENIE_DETALE SET ID_ZAMOWIENIA = v_zamowienia WHERE ID_ZAMOWIENIA IS NULL;
-    v_suma_netto := v_suma_zamowienia/1.23;
-
+/*    IF p_forma_platnosci = 'przelew'
+        THEN
+            v_data_platnosci = sysdate;
+    END IF; */
 
     INSERT INTO FAKTURA (ID_ZAMOWIENIA,DATA_FAKTURY,DATA_PLATNOSCI,FORMA_PLATNOSCI,KWOTA_NETTO,KWOTA_VAT,KWOTA_BRUTTO) VALUES
         (v_zamowienia,
         TO_DATE(sysdate,'DD-MM-YYYY'),
-        v_data_platnosci,
+        CASE
+            WHEN p_forma_platnosci = 'przelew' THEN sysdate
+            ELSE NULL
+        END,
         p_forma_platnosci,
-        v_suma_netto,
-        v_suma_zamowienia-v_suma_netto,
+        v_suma_zamowienia-ROUND(v_suma_zamowienia*0.23,2),
+        ROUND(v_suma_zamowienia*0.23,2),
         v_suma_zamowienia
     )
     RETURNING ID INTO v_faktura;
 
-    FOR produkt IN (SELECT ID,CENA_JEDNOSTKOWA,ILOSC FROM ZAMOWIENIE_DETALE WHERE ID_ZAMOWIENIA = v_zamowienia ORDER BY ID)
+    FOR produkt IN (SELECT CENA_JEDNOSTKOWA,ILOSC FROM ZAMOWIENIE_DETALE WHERE ID_ZAMOWIENIA = v_zamowienia ORDER BY ID)
     LOOP
         INSERT INTO FAKTURA_SPECYFIKACJA (ID_FAKTURY,KWOTA_NETTO, KWOTA_VAT, KWOTA_BRUTTO) VALUES
         (
          v_faktura,
-         (produkt.CENA_JEDNOSTKOWA*produkt.ILOSC)/1.23,
-         produkt.CENA_JEDNOSTKOWA*produkt.ILOSC-(produkt.CENA_JEDNOSTKOWA*produkt.ILOSC/1.23),
+         produkt.CENA_JEDNOSTKOWA*produkt.ILOSC - ROUND(produkt.CENA_JEDNOSTKOWA*produkt.ILOSC*0.23,2),
+         ROUND(produkt.CENA_JEDNOSTKOWA*produkt.ILOSC*0.23,2),
          produkt.CENA_JEDNOSTKOWA*produkt.ILOSC
         );
     END LOOP;
+
 
     UPDATE FAKTURA_SPECYFIKACJA SET ID_FAKTURY = v_faktura WHERE ID_FAKTURY IS NULL;
 
 END ZAPIS_ZAMOWIENIA;
 
-SELECT z.ID_KLIENTA,z.ID,z.DATA_ZAMOWIENIA,z.SUMA_ZAMOWIENIA,z.STATUS FROM ZAMOWIENIE z JOIN KLIENT k ON z.ID_KLIENTA = k.ID;
+-- Z1
+create view zamowienia_klienta as
+select k.nazwa, k.NIP, f.id, z.status, f.data_faktury, f.forma_platnosci, f.kwota_netto, f.kwota_brutto
+    from faktura f join zamowienie z on f.id_zamowienia = z.id join klient k on k.id = z.id_klienta;
+
+select * from zamowienia_klienta;
+
+-- Z2
+create view detale_faktury as
+select f.id as numer_faktury, f.data_faktury, f.data_platnosci,
+       f.forma_platnosci, f.kwota_brutto, f.kwota_netto, f.kwota_vat, k.nazwa, k.nip, p.nazwa as nazwa_produktu, z_d.cena_jednostkowa, z_d.ilosc
+from faktura f
+join zamowienie z on f.id_zamowienia = z.id
+join zamowienie_detale Z_D on Z_D.ID_ZAMOWIENIA = z.ID
+join produkt p on p.id = Z_D.id_produktu
+join klient k on k.id = z.id_klienta;
+
+select * from detale_faktury;
+--statystyki
+
+--usuwanie
+
+ --EXECUTE dbms_stats.delete_table_stats('ADMIN','ZAMOWIENIE');
+ --EXECUTE dbms_stats.delete_table_stats('ADMIN','PRODUKT');
+ --EXECUTE dbms_stats.delete_table_stats('ADMIN','ZAMOWIENIE_DETALE');
+ --EXECUTE dbms_stats.delete_table_stats('ADMIN','FAKTURA');
+
+--czy_dzialaja?
+
+select client_name,status from DBA_AUTOTASK_CLIENT;
+
+--kiedy ostatnio zebrane?
+select owner,table_name,last_analyzed from dba_tab_statistics WHERE TABLE_NAME= 'ZAMOWIENIE';
+select owner,table_name,last_analyzed from dba_tab_statistics WHERE TABLE_NAME= 'PRODUKT';
+select owner,table_name,last_analyzed from dba_tab_statistics WHERE TABLE_NAME= 'ZAMOWIENIE_DETALE';
+select owner,table_name,last_analyzed from dba_tab_statistics WHERE TABLE_NAME= 'FAKTURA';
+select owner,table_name,last_analyzed from dba_tab_statistics WHERE TABLE_NAME= 'KLIENT';
+select owner,table_name,last_analyzed from dba_tab_statistics WHERE TABLE_NAME= 'FAKTURA_SPECYFIKACJA';
+
+EXECUTE dbms_stats.gather_table_stats('ADMIN','ZAMOWIENIE');
+EXECUTE dbms_stats.gather_table_stats('ADMIN','PRODUKT');
+EXECUTE dbms_stats.gather_table_stats('ADMIN','ZAMOWIENIE_DETALE');
+EXECUTE dbms_stats.gather_table_stats('ADMIN','FAKTURA');
+EXECUTE dbms_stats.gather_table_stats('ADMIN','KLIENT');
+EXECUTE dbms_stats.gather_table_stats('ADMIN','FAKTURA_SPECYFIKACJA');
